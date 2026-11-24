@@ -23,18 +23,25 @@ the curved fillet and the foot wall. The **original room** (tile ceiling) is inc
 | Field of view | Size of the visible circle for each eye. |
 | Phone screen width | Converts millimetres to pixels. Measure the long side of the lit screen once. |
 
-*Show split view behind settings* shows the two screens live under the sliders. Settings are saved on the phone.
+*Show split view behind settings* shows the two screens live under the sliders. Settings are saved on the phone,
+and the same settings are in the VR Settings panel.
 
-### In the headset
-- **Headset button (a screen tap) anywhere → recenter** the view, so what you face becomes straight ahead.
-- **Menu:** look below the view (toward your feet when you are really lying down) until the gaze dot is on a
-  button; the ring grows. Then **press the headset button to click it**: pictures, *Sit up* / *Lie down*,
-  *Recenter*, *Settings*, and **comfort rating 1–5**.
-- **Hold the headset button for 1 second:** shows Settings / Recenter / Exit.
-- **Headsets without a button:** in Settings, turn on *Press buttons by looking at them for 1 s*.
-- **Lying down:** *I am sitting* shows the ceiling straight ahead. *I am lying down myself* means you lie on your
-  back and press the button while looking up.
-- **Ratings:** stored on the phone. Download them as CSV from the settings screen.
+### In the headset: everything is controlled from inside VR
+- **Headset button (a screen tap) anywhere → recenter** the view.
+- **Look at a button and press the headset button → click it.** The gaze ring grows when you are on a button.
+- **Menu** (look below the view; toward your feet when you are really lying down): pictures (Room, B–F),
+  *Sit up* / *Lie down*, *Recenter*, *Settings*, **comfort rating 1–5**.
+- **Settings** opens a panel straight in front of you, with **all** options:
+  - **Headset preset** ◀ ▶.
+  - **Lens values:** lens separation, lens distance, distortion k1 and k2, lens height, field of view, screen width.
+    Each has `−− − value + ++` (small and big steps).
+  - **Toggles:** calibration grid, centre line, look-to-press, and lying (*I am sitting* / *I lie down myself*).
+  - **Reset lens**, **Back**, **Exit VR**.
+  - Changes apply instantly, so you tune the optics while looking through the lenses; turn the calibration grid on
+    for this.
+- **Hold the headset button for 1 second:** shows a small screen overlay with Settings / Recenter / Exit.
+- **Headsets without a button:** turn on *Look-to-press*; a button is then pressed after you look at it for 1 second.
+- **Ratings:** stored on the phone. Download them as CSV on the start page.
 
 ## How the room images were made
 - The room is rendered in **Blender (Cycles)** from the patient's eyes as **stereo 360° panoramas**:

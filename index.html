@@ -56,6 +56,9 @@
 <div id="setup"><div class="wrap">
   <h1>Patient Room VR</h1>
   <p class="sub">See the room as the patient: sitting up in bed or lying down. The ceiling, fillet and foot wall carry the printed landscape.</p>
+  <div class="actions" style="margin-top:0"><button class="btn big" id="enterTop">Enter VR (2 screens)</button></div>
+  <p class="note" style="margin:0 0 12px">Everything, including all headset settings, can be changed inside VR: look below the view for the menu, then Settings.
+    Look at a button and press the headset button. Pressing it anywhere else recenters the view.</p>
 
   <div class="grid">
     <div class="card">
@@ -171,6 +174,7 @@ function recenter() {
   else if (Math.abs(f[1]) > 0.85) yaw = Math.atan2(-u[0], u[2]);                            // looking up: screen top away
   else yaw = Math.atan2(f[0], -f[2]);
   if (!hasSensor) { dragYaw = 0; dragPitch = 0; }
+  if (panel === 'settings') placeSettings();
   toast('Recentred');
 }
 
@@ -300,56 +304,121 @@ async function loadScene() {
 }
 const sceneLabel = (id) => (MAN.scenes.find(s => s.id === id) || { label: id }).label;
 
-// ------------------------------------------------------------------ gaze menu (a 2D canvas drawn into the 3D room)
-const MW = 1024, MH = 384, menuCv = document.createElement('canvas'); menuCv.width = MW; menuCv.height = MH;
-let items = [], hover = -1, dwellT = 0, menuOn = true;
+// ------------------------------------------------------------------ VR panels (2D canvases drawn into the 3D room)
+// Everything is reachable inside the headset with gaze + the headset button:
+//   'main'     pictures / sit / lie / recenter / settings / comfort stars (below the view)
+//   'settings' every optics + app setting with -- - value + ++ buttons (opens straight in front of you)
+const PANELS = { main: { W: 1024, H: 384, half: [0.40, 0.15] }, settings: { W: 1024, H: 1090, half: [0.44, 0.44 * 1090 / 1024] } };
+for (const k in PANELS) { const p = PANELS[k]; p.cv = document.createElement('canvas'); p.cv.width = p.W; p.cv.height = p.H; }
+let panel = 'main', items = [], hover = -1, dwellT = 0, menuOn = true, setFrame = null;
+const STEPS = { ipd: [0.5, 2], lens: [0.5, 2], k1: [0.01, 0.05], k2: [0.01, 0.05], voff: [0.5, 2], fov: [1, 5], scrw: [0.5, 5] };
+const LIM = { ipd: [54, 74], lens: [30, 55], k1: [0, 0.8], k2: [0, 0.8], voff: [-15, 15], fov: [35, 70], scrw: [100, 190] };
+const LABEL = { ipd: 'Lens separation', lens: 'Lens distance', k1: 'Distortion k1', k2: 'Distortion k2', voff: 'Lens height',
+                fov: 'Field of view', scrw: 'Screen width' };
+const PRESET_NAMES = { cardboard2: 'Cardboard v2', cardboard1: 'Cardboard v1', vrbox: 'VR Box', flat: 'No lens' };
+const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const norm = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+const dot = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const fmt = (k) => (+S[k]).toFixed(k === 'k1' || k === 'k2' ? 2 : k === 'fov' ? 0 : 1) + (k === 'fov' ? '°' : k[0] === 'k' ? '' : ' mm');
+function bump(k, d) { const [lo, hi] = LIM[k]; S[k] = Math.round(Math.min(hi, Math.max(lo, S[k] + d)) * 1000) / 1000; save(); syncUI(); }
+function cyclePreset(d) {
+  const ks = Object.keys(PRESETS), i = (ks.indexOf(S.preset) + d + ks.length) % ks.length;
+  S.preset = ks[i]; Object.assign(S, PRESETS[S.preset]); save(); syncUI();
+}
+function placeSettings() {                  // world-fixed panel straight in front of the current gaze
+  const m = qmat(headQ()), f = mvec(m, [0, 0, -1]), u = mvec(m, [0, 1, 0]);
+  const r = norm(cross(f, u)), up = norm(cross(r, f)), D = 1.25, P = PANELS.settings;
+  setFrame = { C: f.map(x => x * D), R: r.map(x => x * P.half[0]), Uv: up.map(x => x * P.half[1]) };
+}
+function openSettings() { panel = 'settings'; placeSettings(); hover = -1; layout(); drawMenu(); }
+function closeSettings() { panel = 'main'; hover = -1; layout(); drawMenu(); }
 function layout() {
   items = [];
-  const sc = MAN ? MAN.scenes : [];
-  const w = (MW - 20) / Math.max(1, sc.length);
-  sc.forEach((s, i) => items.push({ x: 10 + i * w, y: 12, w: w - 8, h: 104, label: s.short || s.label, act: () => { S.scene = s.id; save(); loadScene(); }, on: () => S.scene === s.id }));
-  const row2 = [['Sit up', () => { S.pose = 'sit'; save(); loadScene(); }, () => S.pose === 'sit'],
-                ['Lie down', () => { S.pose = 'lie'; save(); loadScene(); }, () => S.pose === 'lie'],
-                ['Recenter', recenter, () => false], ['Settings', exitToSetup, () => false]];
-  row2.forEach((r, i) => items.push({ x: 10 + i * 251, y: 136, w: 243, h: 100, label: r[0], act: r[1], on: r[2] }));
-  for (let k = 1; k <= 5; k++) items.push({ x: 300 + (k - 1) * 140, y: 262, w: 128, h: 108, label: '★'.repeat(1) + k, star: k,
-    act: () => rate(k), on: () => currentRating() >= k });
+  if (panel === 'main') {
+    const P = PANELS.main, sc = MAN ? MAN.scenes : [];
+    const w = (P.W - 20) / Math.max(1, sc.length);
+    sc.forEach((s, i) => items.push({ x: 10 + i * w, y: 12, w: w - 8, h: 104, label: s.short || s.label,
+      act: () => { S.scene = s.id; save(); loadScene(); }, on: () => S.scene === s.id }));
+    [['Sit up', () => { S.pose = 'sit'; save(); loadScene(); }, () => S.pose === 'sit'],
+     ['Lie down', () => { S.pose = 'lie'; save(); loadScene(); }, () => S.pose === 'lie'],
+     ['Recenter', recenter, () => false], ['Settings', openSettings, () => false]]
+      .forEach((r, i) => items.push({ x: 10 + i * 251, y: 136, w: 243, h: 100, label: r[0], act: r[1], on: r[2] }));
+    for (let k = 1; k <= 5; k++) items.push({ x: 300 + (k - 1) * 140, y: 262, w: 128, h: 108, star: k, label: '★',
+      act: () => rate(k), on: () => currentRating() >= k });
+    return;
+  }
+  let y = 92;                                // settings: headset preset
+  items.push({ x: 300, y, w: 100, h: 80, label: '◀', act: () => cyclePreset(-1), on: () => false });
+  items.push({ x: 410, y, w: 470, h: 80, label: () => 'Headset: ' + (PRESET_NAMES[S.preset] || S.preset), act: () => cyclePreset(1), on: () => false });
+  items.push({ x: 890, y, w: 110, h: 80, label: '▶', act: () => cyclePreset(1), on: () => false });
+  y += 92;
+  Object.keys(STEPS).forEach(k => {          // one row per optics value: --  -  value  +  ++
+    const [s1, s2] = STEPS[k];
+    items.push({ x: 300, y, w: 100, h: 76, label: '−−', act: () => bump(k, -s2), on: () => false });
+    items.push({ x: 410, y, w: 100, h: 76, label: '−', act: () => bump(k, -s1), on: () => false });
+    items.push({ x: 520, y, w: 250, h: 76, label: () => fmt(k), value: true, row: LABEL[k], act: () => {}, on: () => false });
+    items.push({ x: 780, y, w: 100, h: 76, label: '+', act: () => bump(k, s1), on: () => false });
+    items.push({ x: 890, y, w: 110, h: 76, label: '++', act: () => bump(k, s2), on: () => false });
+    y += 86;
+  });
+  y += 8;
+  [[() => 'Calibration grid: ' + (S.grid ? 'ON' : 'off'), () => { S.grid = !S.grid; save(); syncUI(); }, () => S.grid],
+   [() => 'Centre line: ' + (S.divider ? 'ON' : 'off'), () => { S.divider = !S.divider; save(); syncUI(); }, () => S.divider],
+   [() => 'Look-to-press: ' + (S.dwell ? 'ON' : 'off'), () => { S.dwell = !S.dwell; save(); syncUI(); }, () => S.dwell],
+   [() => S.lieMode === 'real' ? 'Lying: I lie down myself' : 'Lying: I am sitting',
+    () => { S.lieMode = S.lieMode === 'real' ? 'virtual' : 'real'; save(); syncUI(); recenter(); }, () => S.lieMode === 'real']]
+    .forEach((t, i) => items.push({ x: 24 + (i % 2) * 496, y: y + Math.floor(i / 2) * 92, w: 480, h: 80, label: t[0], act: t[1], on: t[2] }));
+  y += 2 * 92 + 8;
+  [['Reset lens', () => { Object.assign(S, PRESETS[S.preset]); save(); syncUI(); toast('Lens values reset'); }],
+   ['Back', closeSettings], ['Exit VR', exitToSetup]]
+    .forEach((b, i) => items.push({ x: 24 + i * 330, y, w: 316, h: 84, label: b[0], act: b[1], on: () => false }));
 }
 function drawMenu() {
   if (!MAN) return;
-  const c = menuCv.getContext('2d');
-  c.clearRect(0, 0, MW, MH);
-  c.fillStyle = 'rgba(12,16,22,0.78)'; roundRect(c, 0, 0, MW, MH, 28); c.fill();
-  c.textAlign = 'center'; c.textBaseline = 'middle';
+  const P = PANELS[panel], c = P.cv.getContext('2d');
+  c.clearRect(0, 0, P.W, P.H);
+  c.fillStyle = 'rgba(12,16,22,0.84)'; roundRect(c, 0, 0, P.W, P.H, 28); c.fill();
+  c.textBaseline = 'middle';
+  if (panel === 'settings') {
+    c.fillStyle = '#fff'; c.font = 'bold 40px system-ui, sans-serif'; c.textAlign = 'left'; c.fillText('Settings', 28, 46);
+    c.fillStyle = '#9aa7b5'; c.font = '24px system-ui, sans-serif'; c.textAlign = 'right';
+    c.fillText('look at a button + press the headset button', P.W - 28, 48);
+  }
   items.forEach((it, i) => {
-    const on = it.on(), hv = i === hover;
-    c.fillStyle = on ? 'rgba(240,180,41,0.95)' : hv ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.10)';
+    const on = it.on(), hv = i === hover, label = typeof it.label === 'function' ? it.label() : it.label;
+    if (it.value) {                          // value box, with its row name on the left
+      c.fillStyle = '#cfd8e3'; c.font = '28px system-ui, sans-serif'; c.textAlign = 'left'; c.fillText(it.row, 28, it.y + it.h / 2);
+      c.fillStyle = 'rgba(255,255,255,0.06)'; roundRect(c, it.x, it.y, it.w, it.h, 14); c.fill();
+      c.fillStyle = '#f0b429'; c.font = 'bold 34px system-ui, sans-serif'; c.textAlign = 'center';
+      c.fillText(label, it.x + it.w / 2, it.y + it.h / 2);
+      return;
+    }
+    c.fillStyle = on ? 'rgba(240,180,41,0.95)' : hv ? 'rgba(255,255,255,0.30)' : 'rgba(255,255,255,0.10)';
     roundRect(c, it.x, it.y, it.w, it.h, 18); c.fill();
-    c.fillStyle = on ? '#111' : '#fff';
+    if (hv) { c.strokeStyle = '#fff'; c.lineWidth = 4; roundRect(c, it.x + 2, it.y + 2, it.w - 4, it.h - 4, 16); c.stroke(); }
+    c.fillStyle = on ? '#111' : '#fff'; c.textAlign = 'center';
     c.font = it.star ? 'bold 46px system-ui, sans-serif' : 'bold 30px system-ui, sans-serif';
-    c.fillText(it.star ? '★' : it.label, it.x + it.w / 2, it.y + it.h / 2 + (it.star ? 2 : 0));
+    c.fillText(label, it.x + it.w / 2, it.y + it.h / 2 + (it.star ? 2 : 0));
   });
-  c.fillStyle = '#cfd8e3'; c.font = '26px system-ui, sans-serif'; c.textAlign = 'left';
-  c.fillText('Comfort', 40, 316);
-  upload(2, menuCv);
+  if (panel === 'main') { c.fillStyle = '#cfd8e3'; c.font = '26px system-ui, sans-serif'; c.textAlign = 'left'; c.fillText('Comfort', 40, 316); }
+  upload(2, P.cv);
 }
 function roundRect(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
-function menuFrame() {                      // centre and half-axes (metres) in the device world frame
-  const elev = (S.pose === 'lie' && S.lieMode === 'real') ? 50 : -38, e = elev * Math.PI / 180, D = 1.15;
+function menuFrame() {                      // where the active panel is: centre + half-axes (metres, device world frame)
+  if (panel === 'settings' && setFrame) return setFrame;
+  const elev = (S.pose === 'lie' && S.lieMode === 'real') ? 50 : -38, e = elev * Math.PI / 180, D = 1.15, P = PANELS.main;
   const dir = [0, Math.sin(e), -Math.cos(e)];
-  return { C: dir.map(x => x * D), R: [0.40, 0, 0], Uv: [0, Math.cos(e) * 0.15, Math.sin(e) * 0.15] };
+  return { C: dir.map(x => x * D), R: [P.half[0], 0, 0], Uv: [0, Math.cos(e) * P.half[1], Math.sin(e) * P.half[1]] };
 }
-function gazeHit(rotW, F) {                 // which menu item the head points at
-  const d = mvec(rotW, [0, 0, -1]);
-  const nn = [0, -F.Uv[2], F.Uv[1]];         // plane normal = R x U (R along x)
-  const nl = Math.hypot(nn[1], nn[2]); nn[1] /= nl; nn[2] /= nl;
-  const den = d[0] * nn[0] + d[1] * nn[1] + d[2] * nn[2]; if (Math.abs(den) < 1e-4) return -1;
-  const k = (F.C[0] * nn[0] + F.C[1] * nn[1] + F.C[2] * nn[2]) / den; if (k <= 0) return -1;
+function gazeHit(rotW, F) {                 // which button the head points at (any panel orientation)
+  const d = mvec(rotW, [0, 0, -1]), n = norm(cross(F.R, F.Uv));
+  const den = dot(d, n); if (Math.abs(den) < 1e-4) return -1;
+  const k = dot(F.C, n) / den; if (k <= 0) return -1;
   const q = [d[0] * k - F.C[0], d[1] * k - F.C[1], d[2] * k - F.C[2]];
-  const mx = (q[0] * F.R[0]) / (0.40 * 0.40), my = (q[1] * F.Uv[1] + q[2] * F.Uv[2]) / (0.15 * 0.15);
+  const mx = dot(q, F.R) / dot(F.R, F.R), my = dot(q, F.Uv) / dot(F.Uv, F.Uv);
   if (Math.abs(mx) > 1 || Math.abs(my) > 1) return -1;
-  const px = (mx * 0.5 + 0.5) * MW, py = (0.5 - my * 0.5) * MH;
-  return items.findIndex(it => px >= it.x && px <= it.x + it.w && py >= it.y && py <= it.y + it.h);
+  const P = PANELS[panel], px = (mx * 0.5 + 0.5) * P.W, py = (0.5 - my * 0.5) * P.H;
+  return items.findIndex(it => !it.value && px >= it.x && px <= it.x + it.w && py >= it.y && py <= it.y + it.h);
 }
 
 // ------------------------------------------------------------------ ratings
@@ -405,7 +474,7 @@ async function enterVR() {
   try { await document.documentElement.requestFullscreen({ navigationUI: 'hide' }); } catch (e) {}
   try { await screen.orientation.lock('landscape'); } catch (e) {}
   try { wake = await navigator.wakeLock.request('screen'); } catch (e) {}
-  menuOn = true; layout(); drawMenu();
+  menuOn = true; panel = 'main'; layout(); drawMenu();
   setTimeout(() => { recenter(); if (!hasSensor) toast('No motion sensor: open the page over https. Drag to look around.', 5000); }, 900);
 }
 async function enterPreview() {
@@ -415,13 +484,13 @@ async function enterPreview() {
 }
 const hasSensorCapable = () => 'DeviceOrientationEvent' in window && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
 function exitToSetup() {
-  mode = 'setup'; $('setup').style.display = 'block'; $('hud').style.display = 'none';
+  mode = 'setup'; panel = 'main'; $('setup').style.display = 'block'; $('hud').style.display = 'none';
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   try { screen.orientation.unlock(); } catch (e) {}
   if (wake) { wake.release().catch(() => {}); wake = null; }
   showRatings(); syncUI();
 }
-$('enter').onclick = enterVR;
+$('enter').onclick = enterVR; $('enterTop').onclick = enterVR;
 $('preview').onclick = enterPreview;
 $('liveOptics').onclick = () => { const s = $('setup'); s.classList.toggle('preview'); mode = s.classList.contains('preview') ? 'optics' : 'setup'; askSensors(); };
 $('hudExit').onclick = exitToSetup; $('hudSettings').onclick = exitToSetup; $('hudRecenter').onclick = recenter;
@@ -497,6 +566,7 @@ fetch('scenes/manifest.json').then(r => r.json()).then(m => {
   m.scenes.forEach(s => { const b = document.createElement('button'); b.className = 'opt'; b.dataset.scene = s.id; b.textContent = s.label;
     b.onclick = () => { S.scene = s.id; save(); syncUI(); loadScene(); }; box.appendChild(b); });
   layout(); syncUI(); showRatings(); loadScene();
+  if (new URLSearchParams(location.search).get('panel') === 'settings') openSettings();   // test shortcut
 }).catch(e => toast('Could not load scenes/manifest.json', 5000));
 syncUI();
 (function urlStart() {
