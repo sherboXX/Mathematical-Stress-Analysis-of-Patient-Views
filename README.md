@@ -26,12 +26,14 @@ the curved fillet and the foot wall. The **original room** (tile ceiling) is inc
 *Show split view behind settings* shows the two screens live under the sliders. Settings are saved on the phone.
 
 ### In the headset
-- **Gaze menu:** look below the view (toward your feet when you are really lying down). Hold your gaze on a button
-  for about 1 second to press it: pictures, *Sit up* / *Lie down*, *Recenter*, *Hide menu*, **comfort rating 1–5**.
-- **Headset button (screen tap):** presses the button you are looking at; otherwise it shows the next picture.
-  **Double tap:** shows Settings / Recenter / Exit.
+- **Headset button (a screen tap) anywhere → recenter** the view, so what you face becomes straight ahead.
+- **Menu:** look below the view (toward your feet when you are really lying down) until the gaze dot is on a
+  button; the ring grows. Then **press the headset button to click it**: pictures, *Sit up* / *Lie down*,
+  *Recenter*, *Settings*, and **comfort rating 1–5**.
+- **Hold the headset button for 1 second:** shows Settings / Recenter / Exit.
+- **Headsets without a button:** in Settings, turn on *Press buttons by looking at them for 1 s*.
 - **Lying down:** *I am sitting* shows the ceiling straight ahead. *I am lying down myself* means you lie on your
-  back and Recenter while looking up.
+  back and press the button while looking up.
 - **Ratings:** stored on the phone. Download them as CSV from the settings screen.
 
 ## How the room images were made

@@ -95,13 +95,14 @@
       <div class="row"><label>Phone screen width</label><input type="range" id="scrw" min="100" max="190" step="0.5"><output id="scrwO"></output></div>
       <label class="chk"><input type="checkbox" id="grid"> Calibration grid instead of the room</label>
       <label class="chk"><input type="checkbox" id="divider" checked> Centre line (helps placing the phone)</label>
+      <label class="chk"><input type="checkbox" id="dwell"> Press buttons by looking at them for 1 s (only for headsets without a button)</label>
       <p class="note">Tune with the grid: the two images should merge into one, and straight lines should stay straight up to the edge.
         If the lines bow outward, raise k1/k2; if they bow inward, lower them. Measure your screen width (the long side of the
         lit area) once with a ruler, because millimetres on the screen depend on it.</p>
     </div>
     <div class="card">
       <h2>Comfort ratings</h2>
-      <div id="ratings"><p class="note">In VR, look at the stars below the view to rate how comfortable each ceiling feels.</p></div>
+      <div id="ratings"><p class="note">In VR, put the gaze dot on a star below the view and press the headset button to rate how comfortable each ceiling feels.</p></div>
       <div class="actions"><button class="btn" id="csv">Download CSV</button><button class="btn" id="clearR">Clear</button></div>
     </div>
   </div>
@@ -111,9 +112,9 @@
     <button class="btn" id="preview">Preview without headset</button>
     <button class="btn" id="liveOptics">Show split view behind settings</button>
   </div>
-  <p class="note">In the headset: look below the view (or toward your feet when lying) for the menu, and hold your gaze on a button
-    for about a second to press it. The headset button (screen tap) presses the button you are looking at, or otherwise switches
-    to the next picture. Double-tap shows Settings / Exit. Motion sensors need the page to be opened over https.</p>
+  <p class="note"><b>Headset button:</b> press it anywhere to <b>recenter</b> the view. To use the menu, look below the view
+    (toward your feet when lying for real) until the gaze dot is on a button (the ring grows), then press the headset
+    button to click it. Hold the headset button for 1 second for Settings / Exit. Motion sensors need the page to be opened over https.</p>
 </div></div>
 
 <script>
@@ -309,7 +310,7 @@ function layout() {
   sc.forEach((s, i) => items.push({ x: 10 + i * w, y: 12, w: w - 8, h: 104, label: s.short || s.label, act: () => { S.scene = s.id; save(); loadScene(); }, on: () => S.scene === s.id }));
   const row2 = [['Sit up', () => { S.pose = 'sit'; save(); loadScene(); }, () => S.pose === 'sit'],
                 ['Lie down', () => { S.pose = 'lie'; save(); loadScene(); }, () => S.pose === 'lie'],
-                ['Recenter', recenter, () => false], ['Hide menu', () => { menuOn = false; toast('Tap to show the menu'); }, () => false]];
+                ['Recenter', recenter, () => false], ['Settings', exitToSetup, () => false]];
   row2.forEach((r, i) => items.push({ x: 10 + i * 251, y: 136, w: 243, h: 100, label: r[0], act: r[1], on: r[2] }));
   for (let k = 1; k <= 5; k++) items.push({ x: 300 + (k - 1) * 140, y: 262, w: 128, h: 108, label: '★'.repeat(1) + k, star: k,
     act: () => rate(k), on: () => currentRating() >= k });
@@ -378,7 +379,7 @@ $('clearR').onclick = () => { if (confirm('Clear all ratings on this phone?')) {
 const SLIDERS = { ipd: [' mm', 1], lens: [' mm', 1], k1: ['', 2], k2: ['', 2], voff: [' mm', 1], fov: ['°', 0], scrw: [' mm', 1] };
 function syncUI() {
   Object.keys(SLIDERS).forEach(k => { $(k).value = S[k]; $(k + 'O').textContent = (+S[k]).toFixed(SLIDERS[k][1]) + SLIDERS[k][0]; });
-  $('preset').value = S.preset; $('grid').checked = S.grid; $('divider').checked = S.divider;
+  $('preset').value = S.preset; $('grid').checked = S.grid; $('divider').checked = S.divider; $('dwell').checked = !!S.dwell;
   document.querySelectorAll('[data-pose]').forEach(b => b.classList.toggle('on', b.dataset.pose === S.pose));
   document.querySelectorAll('[data-liemode]').forEach(b => b.classList.toggle('on', b.dataset.liemode === S.lieMode));
   $('lieMode').style.display = S.pose === 'lie' ? 'block' : 'none';
@@ -388,11 +389,12 @@ Object.keys(SLIDERS).forEach(k => $(k).addEventListener('input', () => { S[k] = 
 $('preset').onchange = () => { S.preset = $('preset').value; Object.assign(S, PRESETS[S.preset]); save(); syncUI(); };
 $('grid').onchange = () => { S.grid = $('grid').checked; save(); };
 $('divider').onchange = () => { S.divider = $('divider').checked; save(); };
+$('dwell').onchange = () => { S.dwell = $('dwell').checked; save(); };
 document.querySelectorAll('[data-pose]').forEach(b => b.onclick = () => { S.pose = b.dataset.pose; save(); syncUI(); loadScene(); });
 document.querySelectorAll('[data-liemode]').forEach(b => b.onclick = () => { S.lieMode = b.dataset.liemode; save(); syncUI(); });
 
 // ------------------------------------------------------------------ modes: setup / vr / preview
-let mode = 'setup', wake = null, lastTap = 0;
+let mode = 'setup', wake = null;
 async function askSensors() {
   try { if (typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission) await DeviceOrientationEvent.requestPermission(); } catch (e) {}
   window.addEventListener('deviceorientation', onOrient, true);
@@ -425,30 +427,26 @@ $('liveOptics').onclick = () => { const s = $('setup'); s.classList.toggle('prev
 $('hudExit').onclick = exitToSetup; $('hudSettings').onclick = exitToSetup; $('hudRecenter').onclick = recenter;
 document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && mode === 'vr') exitToSetup(); });
 
-// taps: headset button = tap.  Tap selects the gazed item, else next picture; double tap -> HUD
-canvas.addEventListener('click', () => {
-  const now = performance.now();
-  if (now - lastTap < 350) { $('hud').style.display = 'flex'; setTimeout(() => { if (mode === 'vr') $('hud').style.display = 'none'; }, 4000); lastTap = 0; return; }
-  lastTap = now;
-  setTimeout(() => {
-    if (lastTap !== now) return;
-    if (!menuOn) { menuOn = true; drawMenu(); return; }
-    if (hover >= 0) { items[hover].act(); drawMenu(); return; }
-    if (MAN && (mode === 'vr' || mode.startsWith('preview'))) {
-      const i = MAN.scenes.findIndex(s => s.id === S.scene); S.scene = MAN.scenes[(i + 1) % MAN.scenes.length].id; save(); loadScene();
-      toast(sceneLabel(S.scene));
-    }
-  }, 360);
-});
-// drag to look (desktop / no sensor)
-let drag = null;
-canvas.addEventListener('pointerdown', e => { drag = [e.clientX, e.clientY, dragYaw, dragPitch]; });
+// headset button = a screen tap anywhere: it clicks the menu button under the gaze dot, otherwise it recenters the view.
+// Holding it 1 s shows Settings / Recenter / Exit.  (Dragging still looks around on a computer / without sensors.)
+let drag = null, press = null;
+function showHud() { $('hud').style.display = 'flex'; clearTimeout(showHud.h); showHud.h = setTimeout(() => { if (mode === 'vr') $('hud').style.display = 'none'; }, 5000); }
+canvas.addEventListener('pointerdown', e => { press = { x: e.clientX, y: e.clientY, t: performance.now() }; drag = [e.clientX, e.clientY, dragYaw, dragPitch]; });
 window.addEventListener('pointermove', e => {
   if (!drag) return;
   const k = 2.2 / Math.max(innerWidth, innerHeight);
   dragYaw = drag[2] + (e.clientX - drag[0]) * k; dragPitch = Math.max(-1.5, Math.min(1.5, drag[3] + (e.clientY - drag[1]) * k));
 });
-window.addEventListener('pointerup', () => drag = null);
+window.addEventListener('pointerup', e => {
+  drag = null;
+  if (!press) return;
+  const moved = Math.hypot(e.clientX - press.x, e.clientY - press.y), held = performance.now() - press.t;
+  press = null;
+  if (moved > 12 || !(mode === 'vr' || mode.startsWith('preview'))) return;   // a drag, or not inside the room
+  if (held > 900) { showHud(); return; }
+  if (hover >= 0) { items[hover].act(); dwellT = -0.8; drawMenu(); return; }  // looking at a button: click it
+  recenter();                                                                  // anywhere else: recenter
+});
 
 // ------------------------------------------------------------------ frame loop
 let lastT = performance.now();
@@ -483,11 +481,11 @@ function frame(now) {
     h = gazeHit(rotW, F);
   }
   if (h !== hover) { hover = h; dwellT = 0; drawMenu(); }
-  if (hover >= 0) {
+  if (hover >= 0 && S.dwell) {                     // optional: press by looking (headsets without a button)
     dwellT += dt;
     if (dwellT >= 1.1) { const it = items[hover]; dwellT = -0.8; it.act(); drawMenu(); }
   }
-  gl.uniform2f(U.uRet, Math.max(0, dwellT) / 1.1, hover >= 0 ? 1 : 0);
+  gl.uniform2f(U.uRet, S.dwell ? Math.max(0, dwellT) / 1.1 : 0, hover >= 0 ? 1 : 0);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
 
