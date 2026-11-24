@@ -1,0 +1,62 @@
+{
+ "poses": {
+  "sit": "Sitting up in bed",
+  "lie": "Lying down (sleeping)"
+ },
+ "scenes": [
+  {
+   "id": "original",
+   "label": "Original room",
+   "short": "Room",
+   "poses": [
+    "sit",
+    "lie"
+   ]
+  },
+  {
+   "id": "B_golden_sunset",
+   "label": "B \u00b7 Golden sunset",
+   "short": "B",
+   "poses": [
+    "sit",
+    "lie"
+   ]
+  },
+  {
+   "id": "C_golden_cascade",
+   "label": "C \u00b7 Golden cascade",
+   "short": "C",
+   "poses": [
+    "sit",
+    "lie"
+   ]
+  },
+  {
+   "id": "D_poppies_alpenglow",
+   "label": "D \u00b7 Poppies, alpenglow",
+   "short": "D",
+   "poses": [
+    "sit",
+    "lie"
+   ]
+  },
+  {
+   "id": "E_valley_mist",
+   "label": "E \u00b7 Valley mist",
+   "short": "E",
+   "poses": [
+    "sit",
+    "lie"
+   ]
+  },
+  {
+   "id": "F_golden_sunstar",
+   "label": "F \u00b7 Sun star",
+   "short": "F",
+   "poses": [
+    "sit",
+    "lie"
+   ]
+  }
+ ]
+}

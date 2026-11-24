@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#000000">
+<title>Patient Room VR</title>
+<!--
+  Phone VR (Cardboard-style) view of the Med Surg patient room with the printed landscape on the ceiling + fillet +
+  foot wall.  Two screens (left / right eye), lens (barrel) distortion correction, gyroscope head tracking, adjustable
+  optics, gaze menu.  The room images are Blender Cycles stereo 360 panoramas (omni-directional stereo, 64 mm) rendered
+  from the patient's eyes: sitting up in bed, and lying (sleeping).  No libraries: one WebGL shader does everything.
+-->
+<style>
+  :root { --bg:#0e1116; --panel:#161b22; --line:#2b3340; --text:#e8edf3; --dim:#9aa7b5; --acc:#f0b429; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin:0; height:100%; background:#000; color:var(--text); font:15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow:hidden; }
+  canvas#gl { position:fixed; inset:0; width:100vw; height:100vh; display:block; touch-action:none; }
+  #setup { position:fixed; inset:0; overflow:auto; background:rgba(14,17,22,.94); padding:16px 16px 40px; }
+  #setup.preview { background:rgba(14,17,22,.62); }
+  .wrap { max-width:980px; margin:0 auto; }
+  h1 { font-size:22px; margin:4px 0 2px; }
+  .sub { color:var(--dim); margin:0 0 14px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(290px, 1fr)); gap:12px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .card h2 { font-size:14px; letter-spacing:.04em; text-transform:uppercase; color:var(--dim); margin:0 0 10px; }
+  .opts { display:flex; flex-wrap:wrap; gap:8px; }
+  .opt { border:1px solid var(--line); background:#0f141b; color:var(--text); border-radius:10px; padding:9px 12px; font-size:14px; cursor:pointer; }
+  .opt.on { border-color:var(--acc); box-shadow:0 0 0 1px var(--acc) inset; }
+  .row { display:grid; grid-template-columns: 1fr 110px 54px; align-items:center; gap:8px; margin:6px 0; }
+  .row label { color:var(--dim); font-size:13px; }
+  .row input[type=range] { width:100%; }
+  .row output { text-align:right; font-variant-numeric:tabular-nums; font-size:13px; }
+  select, .btn { font:inherit; color:var(--text); background:#0f141b; border:1px solid var(--line); border-radius:10px; padding:9px 12px; }
+  .btn { cursor:pointer; }
+  .btn.big { background:var(--acc); color:#111; border:none; font-weight:700; font-size:17px; padding:14px 18px; }
+  .actions { display:flex; flex-wrap:wrap; gap:10px; margin:14px 0 6px; }
+  .note { color:var(--dim); font-size:13px; margin:8px 0 0; }
+  .chk { display:flex; align-items:center; gap:8px; margin:6px 0; color:var(--dim); font-size:13px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td, th { padding:4px 6px; border-bottom:1px solid var(--line); text-align:left; }
+  #hud { position:fixed; top:6px; left:50%; transform:translateX(-50%); display:none; gap:8px; z-index:5; }
+  #hud button { font:13px system-ui; color:#fff; background:rgba(0,0,0,.55); border:1px solid rgba(255,255,255,.3); border-radius:16px; padding:6px 12px; }
+  #toast { position:fixed; left:50%; bottom:14px; transform:translateX(-50%); background:rgba(0,0,0,.75); color:#fff; padding:8px 14px; border-radius:16px; font-size:13px; display:none; z-index:6; }
+  #loading { position:fixed; inset:0; display:none; align-items:center; justify-content:center; color:#fff; font-size:16px; pointer-events:none; z-index:4; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="loading">Loading the room…</div>
+<div id="hud"><button id="hudSettings">⚙ Settings</button><button id="hudRecenter">⟳ Recenter</button><button id="hudExit">✕ Exit</button></div>
+<div id="toast"></div>
+
+<div id="setup"><div class="wrap">
+  <h1>Patient Room VR</h1>
+  <p class="sub">See the room as the patient: sitting up in bed or lying down. The ceiling, fillet and foot wall carry the printed landscape.</p>
+
+  <div class="grid">
+    <div class="card">
+      <h2>1 · Ceiling picture</h2>
+      <div class="opts" id="sceneOpts"></div>
+      <p class="note">“Original room” is the unedited room (tile ceiling), for comparison.</p>
+    </div>
+    <div class="card">
+      <h2>2 · Patient position</h2>
+      <div class="opts" id="poseOpts">
+        <button class="opt" data-pose="sit">Sitting up in bed</button>
+        <button class="opt" data-pose="lie">Lying down (sleeping)</button>
+      </div>
+      <div id="lieMode" style="margin-top:10px">
+        <div class="opts">
+          <button class="opt" data-liemode="virtual">I am sitting (forward = ceiling)</button>
+          <button class="opt" data-liemode="real">I am lying down myself</button>
+        </div>
+        <p class="note">Lying, seated user: looking straight ahead shows the ceiling above the bed. Lying for real: lie on your back, feet pointing where you were facing when you pressed Recenter.</p>
+      </div>
+    </div>
+    <div class="card">
+      <h2>3 · VR headset optics</h2>
+      <div class="row"><label>Headset preset</label>
+        <select id="preset" style="grid-column: span 2">
+          <option value="cardboard2">Google Cardboard v2 (2015+)</option>
+          <option value="cardboard1">Google Cardboard v1</option>
+          <option value="vrbox">VR Box / generic plastic headset</option>
+          <option value="flat">No lens correction</option>
+        </select></div>
+      <div class="row"><label>Lens separation (IPD)</label><input type="range" id="ipd" min="54" max="74" step="0.5"><output id="ipdO"></output></div>
+      <div class="row"><label>Screen-to-lens distance</label><input type="range" id="lens" min="30" max="55" step="0.5"><output id="lensO"></output></div>
+      <div class="row"><label>Lens distortion k1</label><input type="range" id="k1" min="0" max="0.8" step="0.01"><output id="k1O"></output></div>
+      <div class="row"><label>Lens distortion k2</label><input type="range" id="k2" min="0" max="0.8" step="0.01"><output id="k2O"></output></div>
+      <div class="row"><label>Vertical lens offset</label><input type="range" id="voff" min="-15" max="15" step="0.5"><output id="voffO"></output></div>
+      <div class="row"><label>Field of view (each eye)</label><input type="range" id="fov" min="35" max="70" step="1"><output id="fovO"></output></div>
+      <div class="row"><label>Phone screen width</label><input type="range" id="scrw" min="100" max="190" step="0.5"><output id="scrwO"></output></div>
+      <label class="chk"><input type="checkbox" id="grid"> Calibration grid instead of the room</label>
+      <label class="chk"><input type="checkbox" id="divider" checked> Centre line (helps placing the phone)</label>
+      <p class="note">Tune with the grid: the two images should merge into one, and straight lines should stay straight up to the edge.
+        If the lines bow outward, raise k1/k2; if they bow inward, lower them. Measure your screen width (the long side of the
+        lit area) once with a ruler, because millimetres on the screen depend on it.</p>
+    </div>
+    <div class="card">
+      <h2>Comfort ratings</h2>
+      <div id="ratings"><p class="note">In VR, look at the stars below the view to rate how comfortable each ceiling feels.</p></div>
+      <div class="actions"><button class="btn" id="csv">Download CSV</button><button class="btn" id="clearR">Clear</button></div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn big" id="enter">Enter VR (2 screens)</button>
+    <button class="btn" id="preview">Preview without headset</button>
+    <button class="btn" id="liveOptics">Show split view behind settings</button>
+  </div>
+  <p class="note">In the headset: look below the view (or toward your feet when lying) for the menu, and hold your gaze on a button
+    for about a second to press it. The headset button (screen tap) presses the button you are looking at, or otherwise switches
+    to the next picture. Double-tap shows Settings / Exit. Motion sensors need the page to be opened over https.</p>
+</div></div>
+
+<script>
+'use strict';
+// ------------------------------------------------------------------ settings
+const PRESETS = {
+  cardboard2: { ipd: 63.9, lens: 39.3, k1: 0.34, k2: 0.55, voff: 0, fov: 55 },
+  cardboard1: { ipd: 60.0, lens: 42.0, k1: 0.441, k2: 0.156, voff: 0, fov: 45 },
+  vrbox:      { ipd: 62.0, lens: 40.0, k1: 0.28, k2: 0.20, voff: 0, fov: 50 },
+  flat:       { ipd: 62.0, lens: 40.0, k1: 0.0, k2: 0.0, voff: 0, fov: 45 },
+};
+const guessScreenMm = () => Math.round(Math.max(screen.width, screen.height) * 0.163 * 2) / 2;   // ~0.163 mm per CSS px
+const DEFAULTS = Object.assign({ preset: 'cardboard2', scene: null, pose: 'sit', lieMode: 'virtual', grid: false,
+  divider: true, scrw: Math.min(190, Math.max(100, guessScreenMm())) }, PRESETS.cardboard2);
+const S = Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem('pvvr.settings') || '{}'));
+const save = () => localStorage.setItem('pvvr.settings', JSON.stringify(S));
+const $ = (id) => document.getElementById(id);
+const toast = (msg, ms = 2200) => { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = 'none', ms); };
+
+// ------------------------------------------------------------------ quaternions / matrices
+const qmul = (a, b) => [a[3]*b[0]+a[0]*b[3]+a[1]*b[2]-a[2]*b[1], a[3]*b[1]-a[0]*b[2]+a[1]*b[3]+a[2]*b[0],
+                        a[3]*b[2]+a[0]*b[1]-a[1]*b[0]+a[2]*b[3], a[3]*b[3]-a[0]*b[0]-a[1]*b[1]-a[2]*b[2]];
+const qaxis = (ax, ang) => { const s = Math.sin(ang/2); return [ax[0]*s, ax[1]*s, ax[2]*s, Math.cos(ang/2)]; };
+function qeulerYXZ(x, y, z) {               // three.js Euler order 'YXZ'
+  const c1 = Math.cos(x/2), c2 = Math.cos(y/2), c3 = Math.cos(z/2), s1 = Math.sin(x/2), s2 = Math.sin(y/2), s3 = Math.sin(z/2);
+  return [s1*c2*c3 + c1*s2*s3, c1*s2*c3 - s1*c2*s3, c1*c2*s3 - s1*s2*c3, c1*c2*c3 + s1*s2*s3];
+}
+function qmat(q) {                          // column-major 3x3 (for gl.uniformMatrix3fv)
+  const [x, y, z, w] = q;
+  return [1-2*(y*y+z*z), 2*(x*y+z*w), 2*(x*z-y*w),  2*(x*y-z*w), 1-2*(x*x+z*z), 2*(y*z+x*w),  2*(x*z+y*w), 2*(y*z-x*w), 1-2*(x*x+y*y)];
+}
+const mvec = (m, v) => [m[0]*v[0]+m[3]*v[1]+m[6]*v[2], m[1]*v[0]+m[4]*v[1]+m[7]*v[2], m[2]*v[0]+m[5]*v[1]+m[8]*v[2]];
+
+// ------------------------------------------------------------------ head tracking
+let devQ = [0, 0, 0, 1], hasSensor = false, yaw = 0;                 // yaw = recentre offset (rad)
+let dragYaw = 0, dragPitch = 0;                                      // preview / no-sensor fallback
+function screenAngle() { return ((screen.orientation && screen.orientation.angle) || window.orientation || 0) * Math.PI / 180; }
+function onOrient(e) {
+  if (e.alpha == null) return;
+  const d = Math.PI / 180;
+  let q = qeulerYXZ(e.beta * d, e.alpha * d, -e.gamma * d);
+  q = qmul(q, [-Math.SQRT1_2, 0, 0, Math.SQRT1_2]);                 // camera looks out of the back of the phone
+  q = qmul(q, qaxis([0, 0, 1], -screenAngle()));                    // landscape / portrait
+  devQ = q; hasSensor = true;
+}
+function headQ() {                                                   // device-world orientation of the head
+  if (hasSensor && mode !== 'preview-drag') return qmul(qaxis([0, 1, 0], yaw), devQ);
+  return qmul(qaxis([0, 1, 0], dragYaw), qaxis([1, 0, 0], dragPitch));
+}
+function recenter() {
+  const m = qmat(hasSensor ? devQ : headQ());
+  const f = mvec(m, [0, 0, -1]), u = mvec(m, [0, 1, 0]);
+  if (S.pose === 'lie' && S.lieMode === 'real') yaw = Math.atan2(u[0], -u[2]) - Math.PI;   // head end -> +Z, feet -> -Z
+  else if (Math.abs(f[1]) > 0.85) yaw = Math.atan2(-u[0], u[2]);                            // looking up: screen top away
+  else yaw = Math.atan2(f[0], -f[2]);
+  if (!hasSensor) { dragYaw = 0; dragPitch = 0; }
+  toast('Recentred');
+}
+
+// ------------------------------------------------------------------ WebGL
+const canvas = $('gl');
+const gl = canvas.getContext('webgl', { antialias: false, alpha: false, preserveDrawingBuffer: false });
+if (!gl) document.body.innerHTML = '<p style="padding:20px">WebGL is not available on this browser.</p>';
+const VS = 'attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }';
+const FS = `
+precision highp float;
+uniform vec2 uRes; uniform vec2 uLensL; uniform vec2 uLensR;
+uniform float uPxPerMm, uLensMm, uK1, uK2, uMaxTan, uMonoTan, uIpd;
+uniform int uMono, uGrid, uDivider;
+uniform mat3 uRot, uRotW;
+uniform sampler2D uPanoL, uPanoR, uMenu;
+uniform vec3 uMenuC, uMenuR, uMenuU; uniform float uMenuOn;
+uniform vec2 uRet;                       // x: dwell progress 0..1, y: hovering 0/1
+const float PI = 3.14159265;
+vec3 pano(vec3 d, bool left) {
+  float lon = atan(d.x, -d.z);
+  float lat = asin(clamp(d.y, -1.0, 1.0));
+  vec2 uv = vec2(0.5 + lon / (2.0 * PI), 0.5 + lat / PI);
+  return left ? texture2D(uPanoL, uv).rgb : texture2D(uPanoR, uv).rgb;
+}
+vec3 grid(vec3 d) {                      // straight lines on the faces of a cube around the eye
+  vec3 a = abs(d); vec2 p; vec3 base;
+  if (a.x >= a.y && a.x >= a.z) { p = d.zy / a.x; base = vec3(0.10, 0.06, 0.06); }
+  else if (a.y >= a.z) { p = d.xz / a.y; base = vec3(0.05, 0.10, 0.06); }
+  else { p = d.xy / a.z; base = vec3(0.05, 0.07, 0.12); }
+  vec2 g = abs(fract(p * 5.0 + 0.5) - 0.5);
+  float line = 1.0 - smoothstep(0.0, 0.025, min(g.x, g.y));
+  vec2 g2 = abs(fract(p + 0.5) - 0.5);
+  float major = 1.0 - smoothstep(0.0, 0.012, min(g2.x, g2.y));
+  return base + vec3(0.55) * line + vec3(0.9, 0.75, 0.2) * major;
+}
+void main() {
+  vec2 fc = gl_FragCoord.xy;
+  bool left = true; vec2 t; float r = 0.0; float edge = 1.0;
+  if (uMono == 1) {
+    t = (fc - 0.5 * uRes) / (0.5 * uRes.x) * uMonoTan;
+  } else {
+    left = fc.x < 0.5 * uRes.x;
+    vec2 lc = left ? uLensL : uLensR;
+    vec2 s = (fc - lc) / uPxPerMm / uLensMm;           // where the pixel sits behind the lens (tan units)
+    float rs = length(s); r = rs;
+    for (int i = 0; i < 6; i++) {                       // invert r_screen = r (1 + k1 r^2 + k2 r^4)
+      float r2 = r * r;
+      r -= (r * (1.0 + uK1 * r2 + uK2 * r2 * r2) - rs) / (1.0 + 3.0 * uK1 * r2 + 5.0 * uK2 * r2 * r2);
+    }
+    t = rs > 1e-6 ? s * (r / rs) : s;
+    edge = 1.0 - smoothstep(uMaxTan * 0.93, uMaxTan, r);
+    if (edge <= 0.0) { gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
+  }
+  vec3 v = normalize(vec3(t, -1.0));
+  vec3 col = uGrid == 1 ? grid(uRot * v) : pano(uRot * v, left);
+  if (uMenuOn > 0.5) {                                  // world-anchored menu panel (true stereo parallax)
+    vec3 o = uMono == 1 ? vec3(0.0) : uRotW * vec3(left ? -0.5 * uIpd : 0.5 * uIpd, 0.0, 0.0);
+    vec3 dw = uRotW * v;
+    vec3 n = normalize(cross(uMenuR, uMenuU));
+    float den = dot(dw, n);
+    if (abs(den) > 1e-4) {
+      float k = dot(uMenuC - o, n) / den;
+      if (k > 0.0) {
+        vec3 q = o + k * dw - uMenuC;
+        vec2 m = vec2(dot(q, uMenuR) / dot(uMenuR, uMenuR), dot(q, uMenuU) / dot(uMenuU, uMenuU));
+        if (abs(m.x) <= 1.0 && abs(m.y) <= 1.0) {
+          vec4 mc = texture2D(uMenu, 0.5 + 0.5 * m);
+          col = mix(col, mc.rgb, mc.a);
+        }
+      }
+    }
+  }
+  float rr = length(t);                                 // gaze reticle at the centre of each eye
+  float ring = smoothstep(0.004, 0.002, abs(rr - (uRet.y > 0.5 ? 0.016 : 0.008)));
+  float ang = atan(t.x, t.y) / (2.0 * PI) + 0.5;
+  float prog = uRet.y > 0.5 && ang < uRet.x ? smoothstep(0.006, 0.003, abs(rr - 0.016)) : 0.0;
+  col = mix(col, vec3(1.0), ring * 0.9);
+  col = mix(col, vec3(0.95, 0.72, 0.16), prog);
+  if (uMono == 0 && uDivider == 1 && abs(fc.x - 0.5 * uRes.x) < 1.5) col = vec3(0.35);
+  gl_FragColor = vec4(col * edge, 1.0);
+}`;
+function shader(type, src) {
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, shader(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FS));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+const U = {};
+['uRes','uLensL','uLensR','uPxPerMm','uLensMm','uK1','uK2','uMaxTan','uMonoTan','uIpd','uMono','uGrid','uDivider','uRot','uRotW',
+ 'uPanoL','uPanoR','uMenu','uMenuC','uMenuR','uMenuU','uMenuOn','uRet'].forEach(n => U[n] = gl.getUniformLocation(prog, n));
+const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+function newTex(unit) {
+  const t = gl.createTexture(); gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, 1, 1, 0, gl.RGB, gl.UNSIGNED_BYTE, new Uint8Array([40, 40, 40]));
+  return t;
+}
+const TEX = [newTex(0), newTex(1), newTex(2)];
+gl.uniform1i(U.uPanoL, 0); gl.uniform1i(U.uPanoR, 1); gl.uniform1i(U.uMenu, 2);
+function upload(unit, img) {
+  gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, TEX[unit]);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, unit === 2 ? gl.RGBA : gl.RGB, unit === 2 ? gl.RGBA : gl.RGB, gl.UNSIGNED_BYTE, img);
+}
+
+// ------------------------------------------------------------------ scenes
+let MAN = null, loaded = '';
+const loadImg = (src) => new Promise((ok, bad) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => bad(src); i.src = src; });
+async function loadScene() {
+  const key = S.scene + '|' + S.pose;
+  if (key === loaded || !MAN) return;
+  $('loading').style.display = 'flex';
+  try {
+    const base = `scenes/${S.scene}_${S.pose}_`;
+    const [L, R] = await Promise.all([loadImg(base + 'L.jpg'), loadImg(base + 'R.jpg')]);
+    upload(0, L); upload(1, R); loaded = key;
+  } catch (e) { toast('Missing image: ' + e, 4000); }
+  $('loading').style.display = 'none';
+  drawMenu();
+}
+const sceneLabel = (id) => (MAN.scenes.find(s => s.id === id) || { label: id }).label;
+
+// ------------------------------------------------------------------ gaze menu (a 2D canvas drawn into the 3D room)
+const MW = 1024, MH = 384, menuCv = document.createElement('canvas'); menuCv.width = MW; menuCv.height = MH;
+let items = [], hover = -1, dwellT = 0, menuOn = true;
+function layout() {
+  items = [];
+  const sc = MAN ? MAN.scenes : [];
+  const w = (MW - 20) / Math.max(1, sc.length);
+  sc.forEach((s, i) => items.push({ x: 10 + i * w, y: 12, w: w - 8, h: 104, label: s.short || s.label, act: () => { S.scene = s.id; save(); loadScene(); }, on: () => S.scene === s.id }));
+  const row2 = [['Sit up', () => { S.pose = 'sit'; save(); loadScene(); }, () => S.pose === 'sit'],
+                ['Lie down', () => { S.pose = 'lie'; save(); loadScene(); }, () => S.pose === 'lie'],
+                ['Recenter', recenter, () => false], ['Hide menu', () => { menuOn = false; toast('Tap to show the menu'); }, () => false]];
+  row2.forEach((r, i) => items.push({ x: 10 + i * 251, y: 136, w: 243, h: 100, label: r[0], act: r[1], on: r[2] }));
+  for (let k = 1; k <= 5; k++) items.push({ x: 300 + (k - 1) * 140, y: 262, w: 128, h: 108, label: '★'.repeat(1) + k, star: k,
+    act: () => rate(k), on: () => currentRating() >= k });
+}
+function drawMenu() {
+  if (!MAN) return;
+  const c = menuCv.getContext('2d');
+  c.clearRect(0, 0, MW, MH);
+  c.fillStyle = 'rgba(12,16,22,0.78)'; roundRect(c, 0, 0, MW, MH, 28); c.fill();
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  items.forEach((it, i) => {
+    const on = it.on(), hv = i === hover;
+    c.fillStyle = on ? 'rgba(240,180,41,0.95)' : hv ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.10)';
+    roundRect(c, it.x, it.y, it.w, it.h, 18); c.fill();
+    c.fillStyle = on ? '#111' : '#fff';
+    c.font = it.star ? 'bold 46px system-ui, sans-serif' : 'bold 30px system-ui, sans-serif';
+    c.fillText(it.star ? '★' : it.label, it.x + it.w / 2, it.y + it.h / 2 + (it.star ? 2 : 0));
+  });
+  c.fillStyle = '#cfd8e3'; c.font = '26px system-ui, sans-serif'; c.textAlign = 'left';
+  c.fillText('Comfort', 40, 316);
+  upload(2, menuCv);
+}
+function roundRect(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+function menuFrame() {                      // centre and half-axes (metres) in the device world frame
+  const elev = (S.pose === 'lie' && S.lieMode === 'real') ? 50 : -38, e = elev * Math.PI / 180, D = 1.15;
+  const dir = [0, Math.sin(e), -Math.cos(e)];
+  return { C: dir.map(x => x * D), R: [0.40, 0, 0], Uv: [0, Math.cos(e) * 0.15, Math.sin(e) * 0.15] };
+}
+function gazeHit(rotW, F) {                 // which menu item the head points at
+  const d = mvec(rotW, [0, 0, -1]);
+  const nn = [0, -F.Uv[2], F.Uv[1]];         // plane normal = R x U (R along x)
+  const nl = Math.hypot(nn[1], nn[2]); nn[1] /= nl; nn[2] /= nl;
+  const den = d[0] * nn[0] + d[1] * nn[1] + d[2] * nn[2]; if (Math.abs(den) < 1e-4) return -1;
+  const k = (F.C[0] * nn[0] + F.C[1] * nn[1] + F.C[2] * nn[2]) / den; if (k <= 0) return -1;
+  const q = [d[0] * k - F.C[0], d[1] * k - F.C[1], d[2] * k - F.C[2]];
+  const mx = (q[0] * F.R[0]) / (0.40 * 0.40), my = (q[1] * F.Uv[1] + q[2] * F.Uv[2]) / (0.15 * 0.15);
+  if (Math.abs(mx) > 1 || Math.abs(my) > 1) return -1;
+  const px = (mx * 0.5 + 0.5) * MW, py = (0.5 - my * 0.5) * MH;
+  return items.findIndex(it => px >= it.x && px <= it.x + it.w && py >= it.y && py <= it.y + it.h);
+}
+
+// ------------------------------------------------------------------ ratings
+const RATINGS = () => JSON.parse(localStorage.getItem('pvvr.ratings') || '[]');
+function currentRating() { const r = RATINGS().filter(x => x.scene === S.scene && x.pose === S.pose); return r.length ? r[r.length - 1].rating : 0; }
+function rate(k) {
+  const r = RATINGS(); r.push({ scene: S.scene, pose: S.pose, rating: k, time: new Date().toISOString() });
+  localStorage.setItem('pvvr.ratings', JSON.stringify(r)); toast(`Rated ${k}/5: ${sceneLabel(S.scene)}`); showRatings();
+}
+function showRatings() {
+  if (!MAN) return;
+  const r = RATINGS(); if (!r.length) return;
+  const last = {}; r.forEach(x => last[x.scene + '|' + x.pose] = x.rating);
+  let h = '<table><tr><th>Picture</th><th>Sitting</th><th>Lying</th></tr>';
+  MAN.scenes.forEach(s => h += `<tr><td>${s.label}</td><td>${last[s.id + '|sit'] || '–'}</td><td>${last[s.id + '|lie'] || '–'}</td></tr>`);
+  $('ratings').innerHTML = h + '</table>';
+}
+$('csv').onclick = () => {
+  const rows = [['scene', 'label', 'pose', 'rating', 'time']].concat(RATINGS().map(x => [x.scene, sceneLabel(x.scene), x.pose, x.rating, x.time]));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([rows.map(r => r.join(',')).join('\n')], { type: 'text/csv' }));
+  a.download = 'comfort_ratings.csv'; a.click();
+};
+$('clearR').onclick = () => { if (confirm('Clear all ratings on this phone?')) { localStorage.removeItem('pvvr.ratings'); $('ratings').innerHTML = '<p class="note">Cleared.</p>'; } };
+
+// ------------------------------------------------------------------ settings UI
+const SLIDERS = { ipd: [' mm', 1], lens: [' mm', 1], k1: ['', 2], k2: ['', 2], voff: [' mm', 1], fov: ['°', 0], scrw: [' mm', 1] };
+function syncUI() {
+  Object.keys(SLIDERS).forEach(k => { $(k).value = S[k]; $(k + 'O').textContent = (+S[k]).toFixed(SLIDERS[k][1]) + SLIDERS[k][0]; });
+  $('preset').value = S.preset; $('grid').checked = S.grid; $('divider').checked = S.divider;
+  document.querySelectorAll('[data-pose]').forEach(b => b.classList.toggle('on', b.dataset.pose === S.pose));
+  document.querySelectorAll('[data-liemode]').forEach(b => b.classList.toggle('on', b.dataset.liemode === S.lieMode));
+  $('lieMode').style.display = S.pose === 'lie' ? 'block' : 'none';
+  document.querySelectorAll('[data-scene]').forEach(b => b.classList.toggle('on', b.dataset.scene === S.scene));
+}
+Object.keys(SLIDERS).forEach(k => $(k).addEventListener('input', () => { S[k] = +$(k).value; save(); syncUI(); }));
+$('preset').onchange = () => { S.preset = $('preset').value; Object.assign(S, PRESETS[S.preset]); save(); syncUI(); };
+$('grid').onchange = () => { S.grid = $('grid').checked; save(); };
+$('divider').onchange = () => { S.divider = $('divider').checked; save(); };
+document.querySelectorAll('[data-pose]').forEach(b => b.onclick = () => { S.pose = b.dataset.pose; save(); syncUI(); loadScene(); });
+document.querySelectorAll('[data-liemode]').forEach(b => b.onclick = () => { S.lieMode = b.dataset.liemode; save(); syncUI(); });
+
+// ------------------------------------------------------------------ modes: setup / vr / preview
+let mode = 'setup', wake = null, lastTap = 0;
+async function askSensors() {
+  try { if (typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission) await DeviceOrientationEvent.requestPermission(); } catch (e) {}
+  window.addEventListener('deviceorientation', onOrient, true);
+}
+async function enterVR() {
+  mode = 'vr'; $('setup').style.display = 'none'; $('setup').classList.remove('preview');
+  await askSensors();
+  try { await document.documentElement.requestFullscreen({ navigationUI: 'hide' }); } catch (e) {}
+  try { await screen.orientation.lock('landscape'); } catch (e) {}
+  try { wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+  menuOn = true; layout(); drawMenu();
+  setTimeout(() => { recenter(); if (!hasSensor) toast('No motion sensor: open the page over https. Drag to look around.', 5000); }, 900);
+}
+async function enterPreview() {
+  mode = hasSensorCapable() ? 'preview' : 'preview-drag'; $('setup').style.display = 'none';
+  await askSensors(); menuOn = true; layout(); drawMenu();
+  $('hud').style.display = 'flex'; toast(hasSensor ? 'Move the phone to look around' : 'Drag to look around');
+}
+const hasSensorCapable = () => 'DeviceOrientationEvent' in window && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
+function exitToSetup() {
+  mode = 'setup'; $('setup').style.display = 'block'; $('hud').style.display = 'none';
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  try { screen.orientation.unlock(); } catch (e) {}
+  if (wake) { wake.release().catch(() => {}); wake = null; }
+  showRatings(); syncUI();
+}
+$('enter').onclick = enterVR;
+$('preview').onclick = enterPreview;
+$('liveOptics').onclick = () => { const s = $('setup'); s.classList.toggle('preview'); mode = s.classList.contains('preview') ? 'optics' : 'setup'; askSensors(); };
+$('hudExit').onclick = exitToSetup; $('hudSettings').onclick = exitToSetup; $('hudRecenter').onclick = recenter;
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && mode === 'vr') exitToSetup(); });
+
+// taps: headset button = tap.  Tap selects the gazed item, else next picture; double tap -> HUD
+canvas.addEventListener('click', () => {
+  const now = performance.now();
+  if (now - lastTap < 350) { $('hud').style.display = 'flex'; setTimeout(() => { if (mode === 'vr') $('hud').style.display = 'none'; }, 4000); lastTap = 0; return; }
+  lastTap = now;
+  setTimeout(() => {
+    if (lastTap !== now) return;
+    if (!menuOn) { menuOn = true; drawMenu(); return; }
+    if (hover >= 0) { items[hover].act(); drawMenu(); return; }
+    if (MAN && (mode === 'vr' || mode.startsWith('preview'))) {
+      const i = MAN.scenes.findIndex(s => s.id === S.scene); S.scene = MAN.scenes[(i + 1) % MAN.scenes.length].id; save(); loadScene();
+      toast(sceneLabel(S.scene));
+    }
+  }, 360);
+});
+// drag to look (desktop / no sensor)
+let drag = null;
+canvas.addEventListener('pointerdown', e => { drag = [e.clientX, e.clientY, dragYaw, dragPitch]; });
+window.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const k = 2.2 / Math.max(innerWidth, innerHeight);
+  dragYaw = drag[2] + (e.clientX - drag[0]) * k; dragPitch = Math.max(-1.5, Math.min(1.5, drag[3] + (e.clientY - drag[1]) * k));
+});
+window.addEventListener('pointerup', () => drag = null);
+
+// ------------------------------------------------------------------ frame loop
+let lastT = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.1, (now - lastT) / 1000); lastT = now;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  const W = Math.round(innerWidth * dpr), H = Math.round(innerHeight * dpr);
+  if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
+  gl.viewport(0, 0, W, H);
+  const stereo = mode === 'vr' || mode === 'optics';
+  const pxPerMm = W / S.scrw;
+  gl.uniform2f(U.uRes, W, H);
+  gl.uniform2f(U.uLensL, W / 2 - S.ipd / 2 * pxPerMm, H / 2 + S.voff * pxPerMm);
+  gl.uniform2f(U.uLensR, W / 2 + S.ipd / 2 * pxPerMm, H / 2 + S.voff * pxPerMm);
+  gl.uniform1f(U.uPxPerMm, pxPerMm); gl.uniform1f(U.uLensMm, S.lens);
+  gl.uniform1f(U.uK1, S.k1); gl.uniform1f(U.uK2, S.k2);
+  gl.uniform1f(U.uMaxTan, Math.tan(S.fov * Math.PI / 180)); gl.uniform1f(U.uMonoTan, Math.tan(50 * Math.PI / 180));
+  gl.uniform1f(U.uIpd, 0.064);
+  gl.uniform1i(U.uMono, stereo ? 0 : 1); gl.uniform1i(U.uGrid, S.grid ? 1 : 0); gl.uniform1i(U.uDivider, S.divider ? 1 : 0);
+  const hq = headQ();
+  const rotW = qmat(hq);
+  const poseQ = (S.pose === 'lie' && S.lieMode === 'real') ? qmul(qaxis([1, 0, 0], -Math.PI / 2), hq) : hq;
+  gl.uniformMatrix3fv(U.uRotW, false, new Float32Array(rotW));
+  gl.uniformMatrix3fv(U.uRot, false, new Float32Array(qmat(poseQ)));
+  const showMenu = menuOn && (mode === 'vr' || mode.startsWith('preview')) && !!MAN;
+  gl.uniform1f(U.uMenuOn, showMenu ? 1 : 0);
+  let h = -1;
+  if (showMenu) {
+    const F = menuFrame();
+    gl.uniform3fv(U.uMenuC, F.C); gl.uniform3fv(U.uMenuR, F.R); gl.uniform3fv(U.uMenuU, F.Uv);
+    h = gazeHit(rotW, F);
+  }
+  if (h !== hover) { hover = h; dwellT = 0; drawMenu(); }
+  if (hover >= 0) {
+    dwellT += dt;
+    if (dwellT >= 1.1) { const it = items[hover]; dwellT = -0.8; it.act(); drawMenu(); }
+  }
+  gl.uniform2f(U.uRet, Math.max(0, dwellT) / 1.1, hover >= 0 ? 1 : 0);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+// ------------------------------------------------------------------ start
+fetch('scenes/manifest.json').then(r => r.json()).then(m => {
+  MAN = m;
+  if (!S.scene || !m.scenes.some(s => s.id === S.scene)) S.scene = m.scenes[0].id;
+  const box = $('sceneOpts');
+  m.scenes.forEach(s => { const b = document.createElement('button'); b.className = 'opt'; b.dataset.scene = s.id; b.textContent = s.label;
+    b.onclick = () => { S.scene = s.id; save(); syncUI(); loadScene(); }; box.appendChild(b); });
+  layout(); syncUI(); showRatings(); loadScene();
+}).catch(e => toast('Could not load scenes/manifest.json', 5000));
+syncUI();
+(function urlStart() {
+  const q = new URLSearchParams(location.search);
+  if (q.get('scene')) S.scene = q.get('scene');
+  if (q.get('pose')) S.pose = q.get('pose');
+  if (q.get('grid')) S.grid = q.get('grid') === '1';
+  if (q.get('yaw')) dragYaw = +q.get('yaw') * Math.PI / 180;
+  if (q.get('pitch')) dragPitch = +q.get('pitch') * Math.PI / 180;
+  if (q.get('mode') === 'preview') { mode = 'preview-drag'; $('setup').style.display = 'none'; }
+  if (q.get('mode') === 'stereo') { mode = 'vr'; $('setup').style.display = 'none'; }
+})();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
