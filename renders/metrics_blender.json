@@ -1,0 +1,98 @@
+{
+ "original": {
+  "v90": {
+   "alpha": 1.525,
+   "D": 1.373,
+   "DI": 0.361,
+   "bright": 0.75,
+   "misses": 2
+  },
+  "v45": {
+   "alpha": 1.478,
+   "D": 1.312,
+   "DI": 0.319,
+   "bright": 0.687,
+   "misses": 2
+  }
+ },
+ "B_golden_sunset": {
+  "v90": {
+   "alpha": 1.872,
+   "D": 1.552,
+   "DI": 0.182,
+   "bright": 0.597,
+   "misses": 2
+  },
+  "v45": {
+   "alpha": 1.728,
+   "D": 1.671,
+   "DI": 0.21,
+   "bright": 0.377,
+   "misses": 2
+  }
+ },
+ "C_golden_cascade": {
+  "v90": {
+   "alpha": 1.848,
+   "D": 1.529,
+   "DI": 0.188,
+   "bright": 0.59,
+   "misses": 2
+  },
+  "v45": {
+   "alpha": 1.701,
+   "D": 1.681,
+   "DI": 0.216,
+   "bright": 0.374,
+   "misses": 2
+  }
+ },
+ "D_poppies_alpenglow": {
+  "v90": {
+   "alpha": 1.925,
+   "D": 1.533,
+   "DI": 0.159,
+   "bright": 0.572,
+   "misses": 2
+  },
+  "v45": {
+   "alpha": 1.718,
+   "D": 1.672,
+   "DI": 0.21,
+   "bright": 0.372,
+   "misses": 2
+  }
+ },
+ "E_valley_mist": {
+  "v90": {
+   "alpha": 1.898,
+   "D": 1.552,
+   "DI": 0.167,
+   "bright": 0.578,
+   "misses": 2
+  },
+  "v45": {
+   "alpha": 1.756,
+   "D": 1.681,
+   "DI": 0.193,
+   "bright": 0.362,
+   "misses": 2
+  }
+ },
+ "F_golden_sunstar": {
+  "v90": {
+   "alpha": 1.883,
+   "D": 1.444,
+   "DI": 0.17,
+   "bright": 0.563,
+   "misses": 1
+  },
+  "v45": {
+   "alpha": 1.643,
+   "D": 1.62,
+   "DI": 0.249,
+   "bright": 0.374,
+   "misses": 2
+  }
+ }
+}

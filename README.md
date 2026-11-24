@@ -62,6 +62,26 @@ the curved fillet and the foot wall. The **original room** (tile ceiling) is inc
 To test on a computer: `index.html?mode=preview&scene=B_golden_sunset&pose=lie` (single view, drag to look),
 `?mode=stereo` (two screens), `&grid=1` (calibration grid).
 
+## Blender renders of the ceiling pictures
+[`renders/gallery.jpg`](renders/gallery.jpg) shows each picture in the room, starting with the original room, in
+three views: lying (looking up), reclined 45° and a room overview. The single images are in `renders/`.
+
+The four metrics measured on these Blender renders are in `renders/metrics_blender.json`. Targets: alpha 0.8–1.2,
+D 1.30–1.50, DI ≤ 1.5, brightness 0.25–0.60.
+
+| Picture | Lying: alpha / D / DI / brightness | Reclined 45°: alpha / D / DI / brightness |
+|---|---|---|
+| Original room | 1.525 miss / 1.373 / 0.361 / 0.750 miss | 1.478 miss / 1.312 / 0.319 / 0.687 miss |
+| B · Golden sunset | 1.872 miss / 1.552 miss / 0.182 / 0.597 | 1.728 miss / 1.671 miss / 0.210 / 0.377 |
+| C · Golden cascade | 1.848 miss / 1.529 miss / 0.188 / 0.590 | 1.701 miss / 1.681 miss / 0.216 / 0.374 |
+| D · Poppies, alpenglow | 1.925 miss / 1.533 miss / 0.159 / 0.572 | 1.718 miss / 1.672 miss / 0.210 / 0.372 |
+| E · Valley mist | 1.898 miss / 1.552 miss / 0.167 / 0.578 | 1.756 miss / 1.681 miss / 0.193 / 0.362 |
+| F · Sun star | 1.883 miss / 1.444 / 0.170 / 0.563 | 1.643 miss / 1.620 miss / 0.249 / 0.374 |
+
+The photo-real pictures bring brightness into range (the original white ceiling is too bright). As real
+photographs, though, they miss alpha (too steep a spectrum) and D (too many detail features). A Fourier detail layer
+can bring alpha into range, at some cost in realism.
+
 ## Credits and licences
 - AI images: RealVisXL V5.0 (SG161222, openrail++), SDXL base 1.0 and the SDXL VAE fp16 fix (CreativeML Open
   RAIL++-M / MIT).
