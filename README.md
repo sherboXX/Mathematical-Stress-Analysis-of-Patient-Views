@@ -6,13 +6,17 @@ This is a phone VR experience (Google Cardboard-style: two screens plus lenses).
 room from the bed, **sitting up** or **lying down (sleeping)**. Each candidate landscape is printed on the ceiling,
 the curved fillet and the foot wall. The **original room** (tile ceiling) is included for comparison.
 
-## Use it
+## Use it: everything happens inside VR
 1. Open the live site on your phone (it must be https, because phones only give motion sensors to https pages).
-2. Choose the **ceiling picture** (Original room, B–F) and the **position** (sitting up / lying down).
-3. Choose your **headset preset**, then fine-tune the **optics** (below). Use the calibration grid while tuning.
-4. Tap **Enter VR (2 screens)**, put the phone in the headset and look ahead. The view recentres after a second.
+   It opens **directly in VR**: two screens with a welcome panel.
+2. Put the phone in the headset and **press the headset button** to start. This first press switches the phone to
+   full screen and turns on the motion sensors.
+3. Everything else is done in VR with gaze + the headset button: pictures, sitting / lying, all headset optics,
+   the calibration grid, comfort ratings, and exit.
 
-### Headset optics
+There is no separate settings page. For a computer, `?setup=1` still opens the old 2D page.
+
+### Headset optics (all in the VR Settings panel)
 | Setting | What it does |
 |---|---|
 | Headset preset | Starting values: Cardboard v2 (IPD 63.9 mm, lens 39.3 mm, k1 0.34, k2 0.55), Cardboard v1, VR Box, none |
@@ -23,8 +27,7 @@ the curved fillet and the foot wall. The **original room** (tile ceiling) is inc
 | Field of view | Size of the visible circle for each eye. |
 | Phone screen width | Converts millimetres to pixels. Measure the long side of the lit screen once. |
 
-*Show split view behind settings* shows the two screens live under the sliders. Settings are saved on the phone,
-and the same settings are in the VR Settings panel.
+Settings are saved on the phone.
 
 ### In the headset: everything is controlled from inside VR
 - **Headset button (a screen tap) anywhere → recenter** the view.
@@ -39,9 +42,11 @@ and the same settings are in the VR Settings panel.
   - **Reset lens**, **Back**, **Exit VR**.
   - Changes apply instantly, so you tune the optics while looking through the lenses; turn the calibration grid on
     for this.
-- **Hold the headset button for 1 second:** shows a small screen overlay with Settings / Recenter / Exit.
+- **Hold the headset button for 1 second:** opens the VR Settings panel.
+- **Exit VR** (in Settings) returns to the welcome panel.
 - **Headsets without a button:** turn on *Look-to-press*; a button is then pressed after you look at it for 1 second.
-- **Ratings:** stored on the phone. Download them as CSV on the start page.
+- **Ratings:** stored on the phone. *Download ratings* / *Clear ratings* are in the VR Settings panel; clearing asks
+  for a second press.
 
 ## How the room images were made
 - The room is rendered in **Blender (Cycles)** from the patient's eyes as **stereo 360° panoramas**:

@@ -44,6 +44,9 @@
   #hud { position:fixed; top:6px; left:50%; transform:translateX(-50%); display:none; gap:8px; z-index:5; }
   #hud button { font:13px system-ui; color:#fff; background:rgba(0,0,0,.55); border:1px solid rgba(255,255,255,.3); border-radius:16px; padding:6px 12px; }
   #toast { position:fixed; left:50%; bottom:14px; transform:translateX(-50%); background:rgba(0,0,0,.75); color:#fff; padding:8px 14px; border-radius:16px; font-size:13px; display:none; z-index:6; }
+  .toastEye { position:fixed; top:68%; transform:translateX(-50%); background:rgba(0,0,0,.78); color:#fff; padding:7px 12px;
+    border-radius:14px; font-size:13px; display:none; z-index:6; max-width:40vw; text-align:center; }
+  #toastL { left:25%; } #toastR { left:75%; }
   #loading { position:fixed; inset:0; display:none; align-items:center; justify-content:center; color:#fff; font-size:16px; pointer-events:none; z-index:4; }
 </style>
 </head>
@@ -51,7 +54,7 @@
 <canvas id="gl"></canvas>
 <div id="loading">Loading the room…</div>
 <div id="hud"><button id="hudSettings">⚙ Settings</button><button id="hudRecenter">⟳ Recenter</button><button id="hudExit">✕ Exit</button></div>
-<div id="toast"></div>
+<div id="toast"></div><div class="toastEye" id="toastL"></div><div class="toastEye" id="toastR"></div>
 
 <div id="setup"><div class="wrap">
   <h1>Patient Room VR</h1>
@@ -135,7 +138,12 @@ const DEFAULTS = Object.assign({ preset: 'cardboard2', scene: null, pose: 'sit',
 const S = Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem('pvvr.settings') || '{}'));
 const save = () => localStorage.setItem('pvvr.settings', JSON.stringify(S));
 const $ = (id) => document.getElementById(id);
-const toast = (msg, ms = 2200) => { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = 'none', ms); };
+function toast(msg, ms = 2200) {          // in VR the message is shown once per eye
+  const ids = (mode === 'vr') ? ['toastL', 'toastR'] : ['toast'];
+  ['toast', 'toastL', 'toastR'].forEach(id => $(id).style.display = 'none');
+  ids.forEach(id => { const t = $(id); t.textContent = msg; t.style.display = 'block'; });
+  clearTimeout(toast.h); toast.h = setTimeout(() => ids.forEach(id => $(id).style.display = 'none'), ms);
+}
 
 // ------------------------------------------------------------------ quaternions / matrices
 const qmul = (a, b) => [a[3]*b[0]+a[0]*b[3]+a[1]*b[2]-a[2]*b[1], a[3]*b[1]-a[0]*b[2]+a[1]*b[3]+a[2]*b[0],
@@ -308,9 +316,10 @@ const sceneLabel = (id) => (MAN.scenes.find(s => s.id === id) || { label: id }).
 // Everything is reachable inside the headset with gaze + the headset button:
 //   'main'     pictures / sit / lie / recenter / settings / comfort stars (below the view)
 //   'settings' every optics + app setting with -- - value + ++ buttons (opens straight in front of you)
-const PANELS = { main: { W: 1024, H: 384, half: [0.40, 0.15] }, settings: { W: 1024, H: 1090, half: [0.44, 0.44 * 1090 / 1024] } };
+const PANELS = { main: { W: 1024, H: 384, half: [0.40, 0.15] }, settings: { W: 1024, H: 1182, half: [0.44, 0.44 * 1182 / 1024] },
+                 welcome: { W: 1024, H: 600, half: [0.50, 0.50 * 600 / 1024] } };
 for (const k in PANELS) { const p = PANELS[k]; p.cv = document.createElement('canvas'); p.cv.width = p.W; p.cv.height = p.H; }
-let panel = 'main', items = [], hover = -1, dwellT = 0, menuOn = true, setFrame = null;
+let panel = 'welcome', items = [], hover = -1, dwellT = 0, menuOn = true, setFrame = null, started = false, clearArm = 0;
 const STEPS = { ipd: [0.5, 2], lens: [0.5, 2], k1: [0.01, 0.05], k2: [0.01, 0.05], voff: [0.5, 2], fov: [1, 5], scrw: [0.5, 5] };
 const LIM = { ipd: [54, 74], lens: [30, 55], k1: [0, 0.8], k2: [0, 0.8], voff: [-15, 15], fov: [35, 70], scrw: [100, 190] };
 const LABEL = { ipd: 'Lens separation', lens: 'Lens distance', k1: 'Distortion k1', k2: 'Distortion k2', voff: 'Lens height',
@@ -334,6 +343,7 @@ function openSettings() { panel = 'settings'; placeSettings(); hover = -1; layou
 function closeSettings() { panel = 'main'; hover = -1; layout(); drawMenu(); }
 function layout() {
   items = [];
+  if (panel === 'welcome') return;          // text only: any press starts
   if (panel === 'main') {
     const P = PANELS.main, sc = MAN ? MAN.scenes : [];
     const w = (P.W - 20) / Math.max(1, sc.length);
@@ -369,8 +379,11 @@ function layout() {
     () => { S.lieMode = S.lieMode === 'real' ? 'virtual' : 'real'; save(); syncUI(); recenter(); }, () => S.lieMode === 'real']]
     .forEach((t, i) => items.push({ x: 24 + (i % 2) * 496, y: y + Math.floor(i / 2) * 92, w: 480, h: 80, label: t[0], act: t[1], on: t[2] }));
   y += 2 * 92 + 8;
+  [[() => 'Download ratings (' + RATINGS().length + ')', downloadCSV], [() => clearArm > performance.now() ? 'Press again to clear' : 'Clear ratings', clearRatings]]
+    .forEach((b, i) => items.push({ x: 24 + i * 496, y, w: 480, h: 80, label: b[0], act: b[1], on: () => false }));
+  y += 92;
   [['Reset lens', () => { Object.assign(S, PRESETS[S.preset]); save(); syncUI(); toast('Lens values reset'); }],
-   ['Back', closeSettings], ['Exit VR', exitToSetup]]
+   ['Back', closeSettings], ['Exit VR', exitVR]]
     .forEach((b, i) => items.push({ x: 24 + i * 330, y, w: 316, h: 84, label: b[0], act: b[1], on: () => false }));
 }
 function drawMenu() {
@@ -379,6 +392,20 @@ function drawMenu() {
   c.clearRect(0, 0, P.W, P.H);
   c.fillStyle = 'rgba(12,16,22,0.84)'; roundRect(c, 0, 0, P.W, P.H, 28); c.fill();
   c.textBaseline = 'middle';
+  if (panel === 'welcome') {
+    const ln = (t, y, f, col) => { c.fillStyle = col; c.font = f; c.textAlign = 'center'; c.fillText(t, P.W / 2, y); };
+    ln('Patient Room VR', 78, 'bold 60px system-ui, sans-serif', '#ffffff');
+    ln('See the hospital room as the patient: sitting up or lying in bed', 140, '28px system-ui, sans-serif', '#cfd8e3');
+    c.fillStyle = 'rgba(240,180,41,0.95)'; roundRect(c, 112, 196, 800, 120, 24); c.fill();
+    ln('Put the phone in the headset', 238, 'bold 36px system-ui, sans-serif', '#111');
+    ln('and press the headset button to start', 284, 'bold 36px system-ui, sans-serif', '#111');
+    ln('Inside: look down for the menu. Press the button while looking at', 376, '26px system-ui, sans-serif', '#e8edf3');
+    ln('a menu item to click it, anywhere else to recenter.', 412, '26px system-ui, sans-serif', '#e8edf3');
+    ln('Hold the button 1 s for Settings: lens, distortion, screen and more.', 462, '26px system-ui, sans-serif', '#e8edf3');
+    ln('iPhone: Share > Add to Home Screen for full screen.', 530, '22px system-ui, sans-serif', '#9aa7b5');
+    upload(2, P.cv);
+    return;
+  }
   if (panel === 'settings') {
     c.fillStyle = '#fff'; c.font = 'bold 40px system-ui, sans-serif'; c.textAlign = 'left'; c.fillText('Settings', 28, 46);
     c.fillStyle = '#9aa7b5'; c.font = '24px system-ui, sans-serif'; c.textAlign = 'right';
@@ -406,6 +433,7 @@ function drawMenu() {
 function roundRect(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
 function menuFrame() {                      // where the active panel is: centre + half-axes (metres, device world frame)
   if (panel === 'settings' && setFrame) return setFrame;
+  if (panel === 'welcome') { const P = PANELS.welcome; return { C: [0, 0, -1.3], R: [P.half[0], 0, 0], Uv: [0, P.half[1], 0] }; }
   const elev = (S.pose === 'lie' && S.lieMode === 'real') ? 50 : -38, e = elev * Math.PI / 180, D = 1.15, P = PANELS.main;
   const dir = [0, Math.sin(e), -Math.cos(e)];
   return { C: dir.map(x => x * D), R: [P.half[0], 0, 0], Uv: [0, Math.cos(e) * P.half[1], Math.sin(e) * P.half[1]] };
@@ -436,12 +464,17 @@ function showRatings() {
   MAN.scenes.forEach(s => h += `<tr><td>${s.label}</td><td>${last[s.id + '|sit'] || '–'}</td><td>${last[s.id + '|lie'] || '–'}</td></tr>`);
   $('ratings').innerHTML = h + '</table>';
 }
-$('csv').onclick = () => {
+function clearRatings() {
+  if (clearArm > performance.now()) { localStorage.removeItem('pvvr.ratings'); clearArm = 0; toast('Ratings cleared'); showRatings(); }
+  else { clearArm = performance.now() + 3000; toast('Press again to clear all ratings'); setTimeout(drawMenu, 3100); }
+}
+function downloadCSV() {
   const rows = [['scene', 'label', 'pose', 'rating', 'time']].concat(RATINGS().map(x => [x.scene, sceneLabel(x.scene), x.pose, x.rating, x.time]));
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([rows.map(r => r.join(',')).join('\n')], { type: 'text/csv' }));
-  a.download = 'comfort_ratings.csv'; a.click();
-};
+  a.download = 'comfort_ratings.csv'; a.click(); toast('Ratings downloaded');
+}
+$('csv').onclick = downloadCSV;
 $('clearR').onclick = () => { if (confirm('Clear all ratings on this phone?')) { localStorage.removeItem('pvvr.ratings'); $('ratings').innerHTML = '<p class="note">Cleared.</p>'; } };
 
 // ------------------------------------------------------------------ settings UI
@@ -474,13 +507,28 @@ async function enterVR() {
   try { await document.documentElement.requestFullscreen({ navigationUI: 'hide' }); } catch (e) {}
   try { await screen.orientation.lock('landscape'); } catch (e) {}
   try { wake = await navigator.wakeLock.request('screen'); } catch (e) {}
-  menuOn = true; panel = 'main'; layout(); drawMenu();
+  started = true; menuOn = true; panel = 'main'; layout(); drawMenu();
   setTimeout(() => { recenter(); if (!hasSensor) toast('No motion sensor: open the page over https. Drag to look around.', 5000); }, 900);
 }
 async function enterPreview() {
   mode = hasSensorCapable() ? 'preview' : 'preview-drag'; $('setup').style.display = 'none';
   await askSensors(); menuOn = true; layout(); drawMenu();
   $('hud').style.display = 'flex'; toast(hasSensor ? 'Move the phone to look around' : 'Drag to look around');
+}
+async function startVR() {                 // first headset-button press: full screen, motion sensors, keep screen on
+  started = true; mode = 'vr';
+  await askSensors();
+  try { await document.documentElement.requestFullscreen({ navigationUI: 'hide' }); } catch (e) {}
+  try { await screen.orientation.lock('landscape'); } catch (e) {}
+  try { wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+  panel = 'main'; hover = -1; layout(); drawMenu();
+  setTimeout(() => { recenter(); if (!hasSensor) toast('No motion sensor found: drag to look around', 5000); }, 700);
+}
+function exitVR() {                         // back to the welcome panel (still in VR view)
+  started = false; panel = 'welcome'; hover = -1; layout(); drawMenu();
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  try { screen.orientation.unlock(); } catch (e) {}
+  if (wake) { wake.release().catch(() => {}); wake = null; }
 }
 const hasSensorCapable = () => 'DeviceOrientationEvent' in window && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
 function exitToSetup() {
@@ -494,7 +542,7 @@ $('enter').onclick = enterVR; $('enterTop').onclick = enterVR;
 $('preview').onclick = enterPreview;
 $('liveOptics').onclick = () => { const s = $('setup'); s.classList.toggle('preview'); mode = s.classList.contains('preview') ? 'optics' : 'setup'; askSensors(); };
 $('hudExit').onclick = exitToSetup; $('hudSettings').onclick = exitToSetup; $('hudRecenter').onclick = recenter;
-document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && mode === 'vr') exitToSetup(); });
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && mode === 'vr' && started && document.fullscreenEnabled) exitVR(); });
 
 // headset button = a screen tap anywhere: it clicks the menu button under the gaze dot, otherwise it recenters the view.
 // Holding it 1 s shows Settings / Recenter / Exit.  (Dragging still looks around on a computer / without sensors.)
@@ -512,7 +560,8 @@ window.addEventListener('pointerup', e => {
   const moved = Math.hypot(e.clientX - press.x, e.clientY - press.y), held = performance.now() - press.t;
   press = null;
   if (moved > 12 || !(mode === 'vr' || mode.startsWith('preview'))) return;   // a drag, or not inside the room
-  if (held > 900) { showHud(); return; }
+  if (mode === 'vr' && !started) { startVR(); return; }                       // first press starts everything
+  if (held > 900) { if (panel !== 'settings') openSettings(); return; }        // hold: Settings in VR
   if (hover >= 0) { items[hover].act(); dwellT = -0.8; drawMenu(); return; }  // looking at a button: click it
   recenter();                                                                  // anywhere else: recenter
 });
@@ -576,8 +625,9 @@ syncUI();
   if (q.get('grid')) S.grid = q.get('grid') === '1';
   if (q.get('yaw')) dragYaw = +q.get('yaw') * Math.PI / 180;
   if (q.get('pitch')) dragPitch = +q.get('pitch') * Math.PI / 180;
-  if (q.get('mode') === 'preview') { mode = 'preview-drag'; $('setup').style.display = 'none'; }
-  if (q.get('mode') === 'stereo') { mode = 'vr'; $('setup').style.display = 'none'; }
+  if (q.get('mode') === 'preview') { mode = 'preview-drag'; started = true; panel = 'main'; $('setup').style.display = 'none'; }
+  else if (q.get('mode') === 'stereo') { mode = 'vr'; started = true; panel = 'main'; $('setup').style.display = 'none'; }
+  else if (q.get('setup') !== '1') { mode = 'vr'; started = false; panel = 'welcome'; $('setup').style.display = 'none'; }
 })();
 requestAnimationFrame(frame);
 </script>
